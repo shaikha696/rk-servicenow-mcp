@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { type Env, fail, ok, snFetch } from "../sn-client";
+import { type SNProps, fail, ok, snFetch } from "../sn-client";
 
 /**
  * Convenience wrappers around the Table API for the most common ITSM flows.
@@ -8,7 +8,7 @@ import { type Env, fail, ok, snFetch } from "../sn-client";
  * tools — these exist to give the LLM clearer affordances for common tasks
  * and to handle "find by number" (INC0010001 → sys_id) transparently.
  */
-export function registerIncidentTools(server: McpServer, env: Env) {
+export function registerIncidentTools(server: McpServer, env: SNProps) {
 	server.tool(
 		"update_incident",
 		"Update an incident by number (INC0010001) or sys_id. Common fields: state, close_code, close_notes, work_notes, comments, assignment_group, assigned_to.",

@@ -1,13 +1,13 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { type Env, fail, ok, snFetch } from "../sn-client";
+import { type SNProps, fail, ok, snFetch } from "../sn-client";
 
 /**
  * Schema discovery: reads sys_dictionary to enumerate columns on a table.
  * Optionally walks the inheritance chain via sys_db_object.super_class so
  * fields inherited from parents (task → incident) are included.
  */
-export function registerSchemaTools(server: McpServer, env: Env) {
+export function registerSchemaTools(server: McpServer, env: SNProps) {
 	server.tool(
 		"get_table_schema",
 		"Return column metadata for a table from sys_dictionary. Useful when an agent needs to discover available fields before constructing a query or create body.",

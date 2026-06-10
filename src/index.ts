@@ -1,32 +1,30 @@
 import { ServiceNowMCP, registeredToolNames } from "./mcp-agent";
-import type { Env } from "./sn-client";
+import {
+	type Env,
+	type SNProps,
+	extractCredentialHeaders,
+} from "./sn-client";
 
 export { ServiceNowMCP };
 
 /**
- * Validate the incoming request's bearer token against MCP_AUTH_TOKEN.
- *
- * If MCP_AUTH_TOKEN is empty or unset → bypass auth (single-user / backward-
- * compat mode). This means existing deployments with no token set keep working
- * without any config change.
- *
- * If MCP_AUTH_TOKEN is set → require "Authorization: Bearer <token>" and
- * reject everything else with 401.
+ * Validate the bearer token. If MCP_AUTH_TOKEN is unset/empty, auth is
+ * bypassed (single-user backward-compat). Otherwise require
+ * "Authorization: Bearer <token>".
  */
 function isAuthorized(request: Request, env: Env): boolean {
-	if (!env.MCP_AUTH_TOKEN) return true; // auth disabled
+	if (!env.MCP_AUTH_TOKEN) return true;
 	const auth = request.headers.get("Authorization");
 	if (!auth?.startsWith("Bearer ")) return false;
 	return auth.slice(7) === env.MCP_AUTH_TOKEN;
 }
 
-function unauthorizedResponse(): Response {
+function unauthorized(): Response {
 	return new Response(
 		JSON.stringify({
 			error: "Unauthorized",
 			message:
-				"Provide a valid Bearer token in the Authorization header. " +
-				"See README for client configuration examples.",
+				"Provide a valid Bearer token in the Authorization header.",
 		}),
 		{
 			status: 401,
@@ -38,11 +36,34 @@ function unauthorizedResponse(): Response {
 	);
 }
 
+/**
+ * Resolve effective credentials in the WORKER handler, where request headers
+ * are reliably available (unlike inside the Durable Object, where the SDK's
+ * SSE transport drops them — see cloudflare/agents#660).
+ *
+ * Header value wins; env var is the fallback. Result is passed to the agent
+ * as `props`, which the SDK persists to DO storage and exposes as this.props
+ * — surviving hibernation and available before any tool call.
+ */
+function resolveProps(request: Request, env: Env): SNProps {
+	const h = extractCredentialHeaders(request);
+	return {
+		instanceUrl: (
+			h.instanceUrl ||
+			env.SERVICENOW_INSTANCE_URL ||
+			""
+		).replace(/\/$/, ""),
+		username: h.username || env.SERVICENOW_USERNAME || "",
+		password: h.password || env.SERVICENOW_PASSWORD || "",
+		scriptExecution:
+			(h.scriptExecution ?? env.ENABLE_SCRIPT_EXECUTION) === "true",
+	};
+}
+
 export default {
 	fetch(request: Request, env: Env, ctx: ExecutionContext) {
 		const url = new URL(request.url);
 
-		// Health check: no auth required, useful for uptime monitors.
 		if (url.pathname === "/health") {
 			return new Response(
 				JSON.stringify(
@@ -50,10 +71,6 @@ export default {
 						status: "ok",
 						service: "ServiceNow MCP Server",
 						auth_enabled: !!env.MCP_AUTH_TOKEN,
-						multi_tenant:
-							"Pass X-ServiceNow-Instance, X-ServiceNow-Username, " +
-							"X-ServiceNow-Password, X-ServiceNow-Script-Execution headers " +
-							"to use per-client credentials instead of env vars.",
 						tools: registeredToolNames(env),
 					},
 					null,
@@ -63,27 +80,24 @@ export default {
 			);
 		}
 
-		// All MCP endpoints require auth when a token is configured.
 		if (!isAuthorized(request, env)) {
-			return unauthorizedResponse();
+			return unauthorized();
 		}
 
-		// Streamable HTTP transport (modern MCP clients, Claude.ai).
+		// Resolve per-request credentials and attach to ctx.props. The agents
+		// SDK reads ctx.props and persists it as this.props on the Durable
+		// Object — available in init() and all tool handlers, hibernation-safe.
+		// (This is the documented mechanism; passing props as a serve() option
+		// does not work.)
+		// @ts-ignore — ctx.props is the SDK's prop-injection channel
+		ctx.props = resolveProps(request, env);
+
 		if (url.pathname === "/mcp") {
-			return ServiceNowMCP.serve("/mcp", { env }).fetch(
-				request,
-				env,
-				ctx,
-			);
+			return ServiceNowMCP.serve("/mcp").fetch(request, env, ctx);
 		}
 
-		// SSE transport (mcp-remote bridge, Claude Desktop).
 		if (url.pathname === "/sse" || url.pathname === "/sse/message") {
-			return ServiceNowMCP.serveSSE("/sse", { env }).fetch(
-				request,
-				env,
-				ctx,
-			);
+			return ServiceNowMCP.serveSSE("/sse").fetch(request, env, ctx);
 		}
 
 		return new Response("Not found", { status: 404 });

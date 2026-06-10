@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { type Env, fail, ok, snFetch } from "../sn-client";
+import { type SNProps, fail, ok, snFetch } from "../sn-client";
 
 /**
  * Update Set helpers.
@@ -22,7 +22,7 @@ import { type Env, fail, ok, snFetch } from "../sn-client";
  * updates the service account's preference, and from that point forward every
  * config change the MCP makes is captured into the chosen update set.
  */
-export function registerUpdateSetTools(server: McpServer, env: Env) {
+export function registerUpdateSetTools(server: McpServer, env: SNProps) {
 	server.tool(
 		"set_current_update_set",
 		"Make an update set the 'current' one for the MCP's service account. " +
@@ -40,13 +40,13 @@ export function registerUpdateSetTools(server: McpServer, env: Env) {
 				// 1. Resolve the service account's user sys_id.
 				const userResp = await snFetch(
 					env,
-					`/api/now/table/sys_user?sysparm_query=user_name=${encodeURIComponent(env.SERVICENOW_USERNAME)}&sysparm_fields=sys_id&sysparm_limit=1`,
+					`/api/now/table/sys_user?sysparm_query=user_name=${encodeURIComponent(env.username)}&sysparm_fields=sys_id&sysparm_limit=1`,
 				);
 				const userSysId: string | undefined =
 					userResp?.result?.[0]?.sys_id;
 				if (!userSysId) {
 					throw new Error(
-						`Could not find sys_user record for user_name='${env.SERVICENOW_USERNAME}'.`,
+						`Could not find sys_user record for user_name='${env.username}'.`,
 					);
 				}
 
@@ -93,8 +93,8 @@ export function registerUpdateSetTools(server: McpServer, env: Env) {
 				return ok({
 					status: "ok",
 					update_set: usResp.result,
-					service_account: env.SERVICENOW_USERNAME,
-					message: `Service account '${env.SERVICENOW_USERNAME}' is now scoped to update set '${usResp.result.name}'. All subsequent MCP-driven config changes will be captured into it.`,
+					service_account: env.username,
+					message: `Service account '${env.username}' is now scoped to update set '${usResp.result.name}'. All subsequent MCP-driven config changes will be captured into it.`,
 				});
 			} catch (e) {
 				return fail(e);
@@ -110,12 +110,12 @@ export function registerUpdateSetTools(server: McpServer, env: Env) {
 			try {
 				const userResp = await snFetch(
 					env,
-					`/api/now/table/sys_user?sysparm_query=user_name=${encodeURIComponent(env.SERVICENOW_USERNAME)}&sysparm_fields=sys_id&sysparm_limit=1`,
+					`/api/now/table/sys_user?sysparm_query=user_name=${encodeURIComponent(env.username)}&sysparm_fields=sys_id&sysparm_limit=1`,
 				);
 				const userSysId = userResp?.result?.[0]?.sys_id;
 				if (!userSysId) {
 					throw new Error(
-						`Could not find sys_user for '${env.SERVICENOW_USERNAME}'.`,
+						`Could not find sys_user for '${env.username}'.`,
 					);
 				}
 				const prefResp = await snFetch(
@@ -127,7 +127,7 @@ export function registerUpdateSetTools(server: McpServer, env: Env) {
 				if (!currentSysId) {
 					return ok({
 						status: "no_preference",
-						message: `No 'sys_update_set' preference set for '${env.SERVICENOW_USERNAME}'. Changes will fall into the Default update set.`,
+						message: `No 'sys_update_set' preference set for '${env.username}'. Changes will fall into the Default update set.`,
 					});
 				}
 				const usResp = await snFetch(

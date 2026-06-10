@@ -1,53 +1,45 @@
 /**
  * ServiceNow REST client + shared helpers.
  *
- * Multi-tenant mode: clients pass X-ServiceNow-* headers per-request.
- * Single-user mode: credentials live in Worker env vars / secrets (wrangler.jsonc).
- * Both modes coexist — headers take priority over env vars.
+ * Multi-tenant credential flow:
+ *   - The Worker fetch handler reads X-ServiceNow-* headers (reliable there),
+ *     falls back to env vars, and passes the result to the agent as `props`.
+ *   - Tools receive a resolved SNProps object, NOT the raw Env.
+ *
+ * Why not read headers inside the Durable Object: the agents SDK's SSE
+ * transport drops request headers before they reach the DO (cloudflare/agents
+ * #660). Resolving in the Worker handler and passing via props is the
+ * hibernation-safe path.
  */
 
 export interface Env {
 	SERVICENOW_INSTANCE_URL: string;
 	SERVICENOW_USERNAME: string;
 	SERVICENOW_PASSWORD: string;
-	/** If exactly "true", the execute_script tool is registered. */
+	/** "true" to register the execute_script tool (env-var default). */
 	ENABLE_SCRIPT_EXECUTION?: string;
-	/**
-	 * Shared bearer token required in Authorization header.
-	 * If empty/unset, auth is bypassed (backward-compat single-user mode).
-	 * Set via: wrangler secret put MCP_AUTH_TOKEN
-	 */
+	/** Shared bearer token. Empty/unset = auth bypassed (single-user mode). */
 	MCP_AUTH_TOKEN?: string;
 }
 
 /**
- * Per-request credentials extracted from HTTP headers.
- * These override env vars when present, enabling multi-tenant usage.
+ * Resolved per-session credentials, passed to the agent as `props`.
+ * This is what tools actually use to talk to ServiceNow.
  */
+export interface SNProps {
+	instanceUrl: string;
+	username: string;
+	password: string;
+	scriptExecution: boolean;
+	[key: string]: unknown; // index signature required by the SDK props type
+}
+
+/** Per-request credential headers extracted from an incoming request. */
 export interface CredentialHeaders {
 	instanceUrl?: string | null;
 	username?: string | null;
 	password?: string | null;
 	scriptExecution?: string | null;
-}
-
-/**
- * Merge per-request credential headers on top of env vars.
- * Headers win; env vars are the fallback.
- */
-export function resolveCredentials(env: Env, h: CredentialHeaders): Env {
-	return {
-		...env,
-		SERVICENOW_INSTANCE_URL: (
-			h.instanceUrl ||
-			env.SERVICENOW_INSTANCE_URL ||
-			""
-		).replace(/\/$/, ""),
-		SERVICENOW_USERNAME: h.username || env.SERVICENOW_USERNAME || "",
-		SERVICENOW_PASSWORD: h.password || env.SERVICENOW_PASSWORD || "",
-		ENABLE_SCRIPT_EXECUTION:
-			h.scriptExecution ?? env.ENABLE_SCRIPT_EXECUTION,
-	};
 }
 
 /** Extract ServiceNow credential headers from an incoming request. */
@@ -65,26 +57,33 @@ export type ToolResult = {
 	isError?: boolean;
 };
 
-function authHeader(env: Env): string {
-	return `Basic ${btoa(`${env.SERVICENOW_USERNAME}:${env.SERVICENOW_PASSWORD}`)}`;
+function authHeader(p: SNProps): string {
+	return `Basic ${btoa(`${p.username}:${p.password}`)}`;
 }
 
-function instanceBase(env: Env): string {
-	return env.SERVICENOW_INSTANCE_URL.replace(/\/$/, "");
+function instanceBase(p: SNProps): string {
+	return (p.instanceUrl || "").replace(/\/$/, "");
 }
 
 /**
  * Wrapper around fetch() with auth, JSON handling, and error normalization.
  * Throws on non-2xx with a message including the ServiceNow error detail.
+ * Operates on resolved SNProps (instance URL + credentials).
  */
 export async function snFetch(
-	env: Env,
+	p: SNProps,
 	path: string,
 	init: RequestInit = {},
 ): Promise<any> {
-	const url = `${instanceBase(env)}${path}`;
+	if (!p.instanceUrl) {
+		throw new Error(
+			"No ServiceNow instance configured. Pass X-ServiceNow-Instance header " +
+				"or set SERVICENOW_INSTANCE_URL env var.",
+		);
+	}
+	const url = `${instanceBase(p)}${path}`;
 	const headers: Record<string, string> = {
-		Authorization: authHeader(env),
+		Authorization: authHeader(p),
 		Accept: "application/json",
 		...((init.headers as Record<string, string>) || {}),
 	};

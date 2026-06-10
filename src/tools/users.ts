@@ -1,8 +1,8 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { type Env, fail, ok, snFetch } from "../sn-client";
+import { type SNProps, fail, ok, snFetch } from "../sn-client";
 
-export function registerUserTools(server: McpServer, env: Env) {
+export function registerUserTools(server: McpServer, env: SNProps) {
 	server.tool(
 		"get_user",
 		"Look up a sys_user by user_name or email. Returns sys_id, name, email, active, title, department, manager by default.",

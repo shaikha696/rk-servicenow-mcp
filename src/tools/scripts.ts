@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { type Env, fail, ok, snFetch } from "../sn-client";
+import { type SNProps, fail, ok, snFetch } from "../sn-client";
 
 /**
  * execute_script — synchronous server-side JavaScript execution.
@@ -56,7 +56,7 @@ interface BootstrapInfo {
 	endpoint_path: string;
 }
 
-async function findExistingApi(env: Env): Promise<BootstrapInfo | null> {
+async function findExistingApi(env: SNProps): Promise<BootstrapInfo | null> {
 	const defResp = await snFetch(
 		env,
 		`/api/now/table/sys_ws_definition?sysparm_query=service_id=${API_ID}^ORapi_id=${API_ID}&sysparm_fields=sys_id,service_id,namespace,api_id&sysparm_limit=1`,
@@ -80,7 +80,7 @@ async function findExistingApi(env: Env): Promise<BootstrapInfo | null> {
 	};
 }
 
-async function bootstrapApi(env: Env): Promise<BootstrapInfo> {
+async function bootstrapApi(env: SNProps): Promise<BootstrapInfo> {
 	const defResp = await snFetch(env, "/api/now/table/sys_ws_definition", {
 		method: "POST",
 		body: JSON.stringify({
@@ -128,7 +128,7 @@ async function bootstrapApi(env: Env): Promise<BootstrapInfo> {
 	};
 }
 
-async function runScriptThroughApi(env: Env, script: string): Promise<any> {
+async function runScriptThroughApi(env: SNProps, script: string): Promise<any> {
 	let info = await findExistingApi(env);
 	if (!info) {
 		info = await bootstrapApi(env);
@@ -152,7 +152,7 @@ async function runScriptThroughApi(env: Env, script: string): Promise<any> {
 	}
 }
 
-export function registerScriptTools(server: McpServer, env: Env) {
+export function registerScriptTools(server: McpServer, env: SNProps) {
 	server.tool(
 		"execute_script",
 		"Execute arbitrary server-side JavaScript on the ServiceNow instance synchronously. " +

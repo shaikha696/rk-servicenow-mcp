@@ -1,12 +1,12 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { type Env, fail, ok, snFetch } from "../sn-client";
+import { type SNProps, fail, ok, snFetch } from "../sn-client";
 
 /**
  * KB search via direct table query (kb_knowledge). Portable on every instance
  * regardless of whether the Knowledge API plugin is active.
  */
-export function registerKnowledgeTools(server: McpServer, env: Env) {
+export function registerKnowledgeTools(server: McpServer, env: SNProps) {
 	server.tool(
 		"search_knowledge",
 		"Search published KB articles by free-text against title, short_description, and text.",

@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { type Env, fail, ok, snFetch } from "../sn-client";
+import { type SNProps, fail, ok, snFetch } from "../sn-client";
 
 /**
  * Exploration tools for discovering the data model of an instance.
@@ -11,7 +11,7 @@ import { type Env, fail, ok, snFetch } from "../sn-client";
  * the metadata tables (sys_db_object, sys_dictionary) directly so the model
  * finds the real name in one call.
  */
-export function registerExploreTools(server: McpServer, env: Env) {
+export function registerExploreTools(server: McpServer, env: SNProps) {
 	server.tool(
 		"search_tables",
 		"Find tables by name or label. ALWAYS use this when the user refers to a table by description, " +

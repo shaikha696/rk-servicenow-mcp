@@ -1,11 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { McpAgent } from "agents/mcp";
-import {
-	type CredentialHeaders,
-	type Env,
-	extractCredentialHeaders,
-	resolveCredentials,
-} from "./sn-client";
+import type { Env, SNProps } from "./sn-client";
 import { registerAggregateTools } from "./tools/aggregate";
 import { registerDebugTools } from "./tools/debug";
 import { registerExploreTools } from "./tools/explore";
@@ -20,76 +15,41 @@ import { registerUserTools } from "./tools/users";
 /**
  * ServiceNow MCP agent.
  *
- * Multi-tenant credential flow:
- *   1. Worker fetch handler validates the bearer token (MCP_AUTH_TOKEN).
- *   2. Client supplies X-ServiceNow-{Instance,Username,Password,Script-Execution}
- *      headers on every request.
- *   3. Our fetch() override captures those headers into _credHeaders BEFORE
- *      calling super.fetch(), which internally triggers init().
- *   4. init() calls resolveCredentials() so tools get the per-request
- *      credentials rather than the static env vars.
+ * Credentials arrive via `props`, resolved in the Worker fetch handler (see
+ * src/index.ts → resolveProps) where request headers are reliably available.
+ * The SDK persists props to Durable Object storage and exposes them as
+ * this.props, surviving hibernation and available before any tool call.
  *
- * Single-user fallback: if no credential headers are present, init() falls
- * back to the Worker env vars (SERVICENOW_INSTANCE_URL, etc.) so existing
- * single-instance deployments keep working unchanged.
- *
- * Hibernation safety: Cloudflare hibernates idle DO instances. On every
- * wake-up a new HTTP request arrives (which triggers our fetch() override
- * before init() re-runs), so _credHeaders is always refreshed.
+ * This avoids cloudflare/agents#660, where the SSE transport drops request
+ * headers before they reach the Durable Object.
  */
-export class ServiceNowMCP extends McpAgent {
+export class ServiceNowMCP extends McpAgent<Env, unknown, SNProps> {
 	server = new McpServer({
 		name: "ServiceNow MCP Server",
 		version: "1.0.0",
 	});
 
-	/**
-	 * Per-session credential headers. Set by the fetch() override on every
-	 * request, before super.fetch() triggers init(). Not stored in DO state —
-	 * refreshed from the triggering HTTP request on every DO wake-up.
-	 */
-	private _credHeaders: CredentialHeaders = {};
-
-	/**
-	 * Override the DO fetch handler to capture credential headers before
-	 * super.fetch() internally calls onStart() → init().
-	 *
-	 * The DO lifecycle for an HTTP-triggered wake:
-	 *   incoming request → this.fetch() → super.fetch() → onStart() → init()
-	 * Setting _credHeaders at the top of this method guarantees init() sees
-	 * them when it calls resolveCredentials().
-	 */
-	// @ts-ignore — DO fetch signature varies by SDK version; the override is safe
-	async fetch(request: Request, ...rest: unknown[]): Promise<Response> {
-		this._credHeaders = extractCredentialHeaders(request);
-		// @ts-ignore
-		return super.fetch(request, ...rest);
-	}
-
 	async init() {
-		// Merge per-request header credentials on top of env var defaults.
-		const env = resolveCredentials(
-			this.env as Env,
-			this._credHeaders,
-		);
+		// props are the resolved per-session credentials.
+		const p = this.props as SNProps;
 
-		registerTableTools(this.server, env);
-		registerIncidentTools(this.server, env);
-		registerUserTools(this.server, env);
-		registerSchemaTools(this.server, env);
-		registerExploreTools(this.server, env);
-		registerAggregateTools(this.server, env);
-		registerKnowledgeTools(this.server, env);
-		registerUpdateSetTools(this.server, env);
-		registerDebugTools(this.server, env);
+		registerTableTools(this.server, p);
+		registerIncidentTools(this.server, p);
+		registerUserTools(this.server, p);
+		registerSchemaTools(this.server, p);
+		registerExploreTools(this.server, p);
+		registerAggregateTools(this.server, p);
+		registerKnowledgeTools(this.server, p);
+		registerUpdateSetTools(this.server, p);
+		registerDebugTools(this.server, p);
 
-		if (env.ENABLE_SCRIPT_EXECUTION === "true") {
-			registerScriptTools(this.server, env);
+		if (p.scriptExecution) {
+			registerScriptTools(this.server, p);
 		}
 	}
 }
 
-/** Tool names registered for /health visibility. */
+/** Tool names for /health visibility. script_execution reflects the env default. */
 export function registeredToolNames(env: Env): string[] {
 	const base = [
 		"query_table",
@@ -110,13 +70,9 @@ export function registeredToolNames(env: Env): string[] {
 		"set_current_update_set",
 		"get_current_update_set",
 		"query_logs",
+		"execute_script (if enabled per-session)",
+		"check_script_runner_status (if enabled per-session)",
+		"reinstall_script_runner (if enabled per-session)",
 	];
-	if (env.ENABLE_SCRIPT_EXECUTION === "true") {
-		base.push(
-			"execute_script",
-			"check_script_runner_status",
-			"reinstall_script_runner",
-		);
-	}
 	return base;
 }

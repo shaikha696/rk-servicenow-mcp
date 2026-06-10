@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { type Env, fail, ok, snFetch } from "../sn-client";
+import { type SNProps, fail, ok, snFetch } from "../sn-client";
 
 /**
  * Debugging tools.
@@ -13,7 +13,7 @@ import { type Env, fail, ok, snFetch } from "../sn-client";
  * Note: syslog's timestamp column is `created_on` (NOT `sys_created_on`) —
  * syslog is a standalone high-volume table with its own audit columns.
  */
-export function registerDebugTools(server: McpServer, env: Env) {
+export function registerDebugTools(server: McpServer, env: SNProps) {
 	server.tool(
 		"query_logs",
 		"Read recent entries from the system log (syslog) — the output of gs.log/info/warn/error/print. " +

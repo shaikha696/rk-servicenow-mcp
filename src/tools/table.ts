@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { type Env, buildReadParams, fail, ok, snFetch } from "../sn-client";
+import { type SNProps, buildReadParams, fail, ok, snFetch } from "../sn-client";
 
 /**
  * Generic Table API tools. These cover every table in the instance —
@@ -11,7 +11,7 @@ import { type Env, buildReadParams, fail, ok, snFetch } from "../sn-client";
  * parameter. Order is expressed inside sysparm_query, e.g.
  *     active=true^priority=1^ORDERBYDESCsys_created_on
  */
-export function registerTableTools(server: McpServer, env: Env) {
+export function registerTableTools(server: McpServer, env: SNProps) {
 	server.tool(
 		"query_table",
 		"Query records from any ServiceNow table via the Table API. " +

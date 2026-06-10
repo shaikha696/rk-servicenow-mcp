@@ -1,12 +1,12 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { type Env, fail, ok, snFetch } from "../sn-client";
+import { type SNProps, fail, ok, snFetch } from "../sn-client";
 
 /**
  * Aggregate API — /api/now/stats/{table}
  * Supports COUNT, SUM, AVG, MIN, MAX, GROUP BY, HAVING.
  */
-export function registerAggregateTools(server: McpServer, env: Env) {
+export function registerAggregateTools(server: McpServer, env: SNProps) {
 	server.tool(
 		"aggregate_table",
 		"Run aggregations over a ServiceNow table: COUNT, SUM, AVG, MIN, MAX, GROUP BY, HAVING.",
