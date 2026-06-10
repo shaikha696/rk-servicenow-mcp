@@ -1,16 +1,63 @@
 /**
  * ServiceNow REST client + shared helpers.
  *
- * One Worker deployment = one instance + one service account.
- * Auth: HTTP Basic against the ServiceNow REST API.
+ * Multi-tenant mode: clients pass X-ServiceNow-* headers per-request.
+ * Single-user mode: credentials live in Worker env vars / secrets (wrangler.jsonc).
+ * Both modes coexist — headers take priority over env vars.
  */
 
 export interface Env {
-	SERVICENOW_INSTANCE_URL: string; // e.g. https://devXXXXX.service-now.com  (no trailing slash)
+	SERVICENOW_INSTANCE_URL: string;
 	SERVICENOW_USERNAME: string;
 	SERVICENOW_PASSWORD: string;
-	/** If exactly the string "true", the execute_script tool is registered. */
+	/** If exactly "true", the execute_script tool is registered. */
 	ENABLE_SCRIPT_EXECUTION?: string;
+	/**
+	 * Shared bearer token required in Authorization header.
+	 * If empty/unset, auth is bypassed (backward-compat single-user mode).
+	 * Set via: wrangler secret put MCP_AUTH_TOKEN
+	 */
+	MCP_AUTH_TOKEN?: string;
+}
+
+/**
+ * Per-request credentials extracted from HTTP headers.
+ * These override env vars when present, enabling multi-tenant usage.
+ */
+export interface CredentialHeaders {
+	instanceUrl?: string | null;
+	username?: string | null;
+	password?: string | null;
+	scriptExecution?: string | null;
+}
+
+/**
+ * Merge per-request credential headers on top of env vars.
+ * Headers win; env vars are the fallback.
+ */
+export function resolveCredentials(env: Env, h: CredentialHeaders): Env {
+	return {
+		...env,
+		SERVICENOW_INSTANCE_URL: (
+			h.instanceUrl ||
+			env.SERVICENOW_INSTANCE_URL ||
+			""
+		).replace(/\/$/, ""),
+		SERVICENOW_USERNAME: h.username || env.SERVICENOW_USERNAME || "",
+		SERVICENOW_PASSWORD: h.password || env.SERVICENOW_PASSWORD || "",
+		ENABLE_SCRIPT_EXECUTION:
+			h.scriptExecution ?? env.ENABLE_SCRIPT_EXECUTION,
+	};
+}
+
+/** Extract ServiceNow credential headers from an incoming request. */
+export function extractCredentialHeaders(req: Request): CredentialHeaders {
+	return {
+		instanceUrl: req.headers.get("X-ServiceNow-Instance"),
+		username: req.headers.get("X-ServiceNow-Username"),
+		password: req.headers.get("X-ServiceNow-Password"),
+		scriptExecution: req.headers.get("X-ServiceNow-Script-Execution"),
+	};
 }
 
 export type ToolResult = {

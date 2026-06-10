@@ -1,6 +1,11 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { McpAgent } from "agents/mcp";
-import type { Env } from "./sn-client";
+import {
+	type CredentialHeaders,
+	type Env,
+	extractCredentialHeaders,
+	resolveCredentials,
+} from "./sn-client";
 import { registerAggregateTools } from "./tools/aggregate";
 import { registerDebugTools } from "./tools/debug";
 import { registerExploreTools } from "./tools/explore";
@@ -15,14 +20,22 @@ import { registerUserTools } from "./tools/users";
 /**
  * ServiceNow MCP agent.
  *
- * Tool groups are registered modularly. Each group lives in src/tools/*.ts and
- * exposes a `register*` function that takes (server, env). Adding new tool
- * groups is mechanical: create a new file under src/tools/, export a register
- * function, import and call it here.
+ * Multi-tenant credential flow:
+ *   1. Worker fetch handler validates the bearer token (MCP_AUTH_TOKEN).
+ *   2. Client supplies X-ServiceNow-{Instance,Username,Password,Script-Execution}
+ *      headers on every request.
+ *   3. Our fetch() override captures those headers into _credHeaders BEFORE
+ *      calling super.fetch(), which internally triggers init().
+ *   4. init() calls resolveCredentials() so tools get the per-request
+ *      credentials rather than the static env vars.
  *
- * execute_script is gated on ENABLE_SCRIPT_EXECUTION="true". If the env var
- * isn't set to exactly "true", the tool is not registered at all — MCP clients
- * won't even see it in the tool list.
+ * Single-user fallback: if no credential headers are present, init() falls
+ * back to the Worker env vars (SERVICENOW_INSTANCE_URL, etc.) so existing
+ * single-instance deployments keep working unchanged.
+ *
+ * Hibernation safety: Cloudflare hibernates idle DO instances. On every
+ * wake-up a new HTTP request arrives (which triggers our fetch() override
+ * before init() re-runs), so _credHeaders is always refreshed.
  */
 export class ServiceNowMCP extends McpAgent {
 	server = new McpServer({
@@ -30,8 +43,35 @@ export class ServiceNowMCP extends McpAgent {
 		version: "1.0.0",
 	});
 
+	/**
+	 * Per-session credential headers. Set by the fetch() override on every
+	 * request, before super.fetch() triggers init(). Not stored in DO state —
+	 * refreshed from the triggering HTTP request on every DO wake-up.
+	 */
+	private _credHeaders: CredentialHeaders = {};
+
+	/**
+	 * Override the DO fetch handler to capture credential headers before
+	 * super.fetch() internally calls onStart() → init().
+	 *
+	 * The DO lifecycle for an HTTP-triggered wake:
+	 *   incoming request → this.fetch() → super.fetch() → onStart() → init()
+	 * Setting _credHeaders at the top of this method guarantees init() sees
+	 * them when it calls resolveCredentials().
+	 */
+	// @ts-ignore — DO fetch signature varies by SDK version; the override is safe
+	async fetch(request: Request, ...rest: unknown[]): Promise<Response> {
+		this._credHeaders = extractCredentialHeaders(request);
+		// @ts-ignore
+		return super.fetch(request, ...rest);
+	}
+
 	async init() {
-		const env = this.env as Env;
+		// Merge per-request header credentials on top of env var defaults.
+		const env = resolveCredentials(
+			this.env as Env,
+			this._credHeaders,
+		);
 
 		registerTableTools(this.server, env);
 		registerIncidentTools(this.server, env);
@@ -72,7 +112,11 @@ export function registeredToolNames(env: Env): string[] {
 		"query_logs",
 	];
 	if (env.ENABLE_SCRIPT_EXECUTION === "true") {
-		base.push("execute_script", "check_script_runner_status", "reinstall_script_runner");
+		base.push(
+			"execute_script",
+			"check_script_runner_status",
+			"reinstall_script_runner",
+		);
 	}
 	return base;
 }

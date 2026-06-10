@@ -8,5 +8,6 @@ interface Env {
 	SERVICENOW_USERNAME: string;
 	SERVICENOW_PASSWORD: string;
 	ENABLE_SCRIPT_EXECUTION?: string;
+	MCP_AUTH_TOKEN?: string;
 	MCP_OBJECT: DurableObjectNamespace;
 }

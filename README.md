@@ -20,15 +20,17 @@ cd rk-servicenow-mcp
 npm install
 
 # Set your instance URL in wrangler.jsonc → vars.SERVICENOW_INSTANCE_URL
+# (leave empty for multi-tenant mode where each client passes their own)
 
 # Store credentials as encrypted secrets (never commit these)
 npx wrangler secret put SERVICENOW_USERNAME
 npx wrangler secret put SERVICENOW_PASSWORD
+npx wrangler secret put MCP_AUTH_TOKEN   # shared token all clients must send
 
 npm run deploy
 ```
 
-Then connect your client to `https://rk-servicenow-mcp.<your-account>.workers.dev/mcp` and start talking to your instance.
+Then connect your client to `https://rk-servicenow-mcp.<your-account>.workers.dev/mcp` with your bearer token and start talking to your instance.
 
 Check it's live: `curl https://rk-servicenow-mcp.<your-account>.workers.dev/health`
 
@@ -107,14 +109,25 @@ Edit `wrangler.jsonc`:
 
 No trailing slash. Set `ENABLE_SCRIPT_EXECUTION` to `"true"` only if you want background script execution.
 
-### 2. Credentials (as secrets, not vars)
+### 2. Auth token + credentials (as secrets, never vars)
 
 ```bash
+# The shared bearer token every client must send
+npx wrangler secret put MCP_AUTH_TOKEN
+
+# Default ServiceNow credentials (used when no X-ServiceNow-* headers are passed)
 npx wrangler secret put SERVICENOW_USERNAME
 npx wrangler secret put SERVICENOW_PASSWORD
 ```
 
-> ⚠️ **Never put credentials in `wrangler.jsonc`.** It's committed to git. Secrets are encrypted and live only in Cloudflare.
+> ⚠️ **Never put credentials or tokens in `wrangler.jsonc`.** It's committed to git. Secrets are encrypted and live only in Cloudflare.
+
+**Generate a strong `MCP_AUTH_TOKEN`:**
+```bash
+openssl rand -hex 32
+# or
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
 
 ### 3. ServiceNow service account roles
 
@@ -150,28 +163,77 @@ The build command works around a bundling issue where esbuild can't resolve a dy
 
 ## Connect your client
 
-### Claude.ai
-Settings → Connectors → Add custom connector → paste:
-```
-https://rk-servicenow-mcp.<your-account>.workers.dev/mcp
-```
+### Authentication
 
-### Claude Desktop
-Settings → Developer → Edit Config, add:
+All endpoints except `/health` require a bearer token when `MCP_AUTH_TOKEN` is set:
+```
+Authorization: Bearer <your-token>
+```
+If `MCP_AUTH_TOKEN` is empty, auth is bypassed (backward-compat single-user mode).
+
+### Multi-tenant credential headers
+
+In multi-tenant mode, each client passes their own ServiceNow credentials as request headers. These override env var defaults:
+
+| Header | Description |
+|---|---|
+| `X-ServiceNow-Instance` | `https://devXXXXX.service-now.com` |
+| `X-ServiceNow-Username` | Service account username |
+| `X-ServiceNow-Password` | Service account password |
+| `X-ServiceNow-Script-Execution` | `true` to enable execute_script |
+
+Headers are optional — omit them to use the Worker's env var defaults.
+
+---
+
+### Claude.ai
+Settings → Connectors → Add custom connector:
+- **URL:** `https://rk-servicenow-mcp.<your-account>.workers.dev/mcp`
+- **Headers:** Add `Authorization: Bearer <token>` and any `X-ServiceNow-*` headers
+
+### Claude Desktop (via `mcp-remote`)
+Settings → Developer → Edit Config. Each person uses their own config block:
+
+**Single user (env var credentials):**
 ```json
 {
   "mcpServers": {
     "servicenow": {
       "command": "npx",
-      "args": ["mcp-remote", "https://rk-servicenow-mcp.<your-account>.workers.dev/sse"]
+      "args": [
+        "mcp-remote",
+        "https://rk-servicenow-mcp.<your-account>.workers.dev/sse",
+        "--header", "Authorization:Bearer <your-token>"
+      ]
     }
   }
 }
 ```
-Restart Claude Desktop.
+
+**Multi-tenant (each user passes their own instance):**
+```json
+{
+  "mcpServers": {
+    "servicenow-labx": {
+      "command": "npx",
+      "args": [
+        "mcp-remote",
+        "https://rk-servicenow-mcp.<your-account>.workers.dev/sse",
+        "--header", "Authorization:Bearer <shared-worker-token>",
+        "--header", "X-ServiceNow-Instance:https://devXXXXX.service-now.com",
+        "--header", "X-ServiceNow-Username:admin",
+        "--header", "X-ServiceNow-Password:mypassword",
+        "--header", "X-ServiceNow-Script-Execution:true"
+      ]
+    }
+  }
+}
+```
+
+Restart Claude Desktop after editing.
 
 ### Cursor / other MCP clients
-Use the `/mcp` URL as a remote MCP server.
+Use `/mcp` as the remote MCP URL. Pass `Authorization: Bearer <token>` and any `X-ServiceNow-*` headers your client supports.
 
 ---
 

@@ -2,13 +2,18 @@
  * For more details on how to configure Wrangler, refer to:
  * https://developers.cloudflare.com/workers/wrangler/configuration/
  *
- * Secrets (set via `wrangler secret put <NAME>`):
- *   SERVICENOW_USERNAME
- *   SERVICENOW_PASSWORD
+ * Secrets (set via `wrangler secret put <NAME>` — never commit these):
+ *   SERVICENOW_USERNAME          — service-account login (single-user mode)
+ *   SERVICENOW_PASSWORD          — service-account password (single-user mode)
+ *   MCP_AUTH_TOKEN               — shared bearer token clients must supply
  *
- * Vars (committed; switch to secrets if your instance URL is sensitive):
- *   SERVICENOW_INSTANCE_URL
- *   ENABLE_SCRIPT_EXECUTION   (set to "true" to register the execute_script tool)
+ * Vars (safe to commit if the instance URL is not sensitive):
+ *   SERVICENOW_INSTANCE_URL      — default instance (single-user / fallback)
+ *   ENABLE_SCRIPT_EXECUTION      — "true" to expose execute_script tool
+ *
+ * Multi-tenant mode: leave USERNAME / PASSWORD / INSTANCE_URL empty and have
+ * each client pass X-ServiceNow-{Instance,Username,Password,Script-Execution}
+ * headers on every request. MCP_AUTH_TOKEN still required for all clients.
  */
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
@@ -35,7 +40,8 @@
 	},
 	"vars": {
 		"SERVICENOW_INSTANCE_URL": "https://your-instance.service-now.com",
-		"ENABLE_SCRIPT_EXECUTION": "true"
+		"ENABLE_SCRIPT_EXECUTION": "true",
+		"MCP_AUTH_TOKEN": ""
 	},
 	"observability": {
 		"enabled": true
